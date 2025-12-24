@@ -9,6 +9,22 @@ app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3000;
 
+// Parse auth from full headers or just the Authorization value
+function parseAuthFromEnv(input) {
+  if (!input) return "";
+  
+  // If it contains multiple lines, it's likely full headers
+  if (input.includes('\n') && input.toLowerCase().includes('authorization:')) {
+    const match = input.match(/authorization:\s*(.+)/i);
+    if (match) {
+      return match[1].trim();
+    }
+  }
+  
+  // Otherwise use as-is
+  return input.trim();
+}
+
 // Configuration - All sensitive data from environment variables
 const CONFIG = {
   discordWebhook: process.env.DISCORD_WEBHOOK || "",
@@ -19,7 +35,7 @@ const CONFIG = {
   userId: process.env.VEEPEE_USER_ID || "",
   secretKey: process.env.VEEPEE_SECRET_KEY || "",
   // Or provide the full pre-computed auth if signature is static
-  authHeader: process.env.VEEPEE_AUTH || ""
+  authHeader: parseAuthFromEnv(process.env.VEEPEE_AUTH)
 };
 
 // Store monitored products
@@ -664,21 +680,39 @@ app.post('/api/products/:key/reset', (req, res) => {
   res.json({ success: true, message: 'Notifications reset' });
 });
 
+// Parse auth from full headers or just the Authorization value
+function parseAuthInput(input) {
+  if (!input) return null;
+  
+  // If it contains multiple lines, it's likely full headers
+  if (input.includes('\n') && input.includes('Authorization:')) {
+    const match = input.match(/Authorization:\s*(.+)/i);
+    if (match) {
+      return match[1].trim();
+    }
+  }
+  
+  // Otherwise use as-is
+  return input.trim();
+}
+
 // Update authorization
 app.post('/api/config/auth', (req, res) => {
   const { userId, secretKey, authHeader } = req.body;
   
-  if (!authHeader && (!userId || !secretKey)) {
+  const parsedAuth = parseAuthInput(authHeader);
+  
+  if (!parsedAuth && (!userId || !secretKey)) {
     return res.status(400).json({ error: 'Either authHeader or userId+secretKey are required' });
   }
   
-  if (authHeader) {
-    CONFIG.authHeader = authHeader;
-    console.log(`[${getTimestamp()}] Auth header updated via API`);
+  if (parsedAuth) {
+    CONFIG.authHeader = parsedAuth;
+    console.log(`[${getTimestamp()}] Auth header updated via API: ${parsedAuth.substring(0, 30)}...`);
   } else {
     CONFIG.userId = userId;
     CONFIG.secretKey = secretKey;
-    CONFIG.authHeader = ''; // Clear pre-computed auth
+    CONFIG.authHeader = '';
     console.log(`[${getTimestamp()}] User credentials updated via API`);
   }
   
