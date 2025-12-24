@@ -41,8 +41,25 @@ const CONFIG = {
 // Store monitored products
 const monitoredProducts = new Map();
 
+// Product history (persists across monitoring sessions)
+const productHistory = new Map();
+
 // Monitoring interval reference
 let monitoringInterval = null;
+
+// Add product to history
+function addToHistory(saleId, itemId, productInfo, sizeMapping) {
+  const key = `${saleId}-${itemId}`;
+  productHistory.set(key, {
+    saleId,
+    itemId,
+    title: productInfo.title || `Produit ${itemId}`,
+    brand: productInfo.brand,
+    sizeMapping,
+    addedAt: new Date().toISOString(),
+    lastMonitored: new Date().toISOString()
+  });
+}
 
 // ============== VEEPEE API FUNCTIONS ==============
 
@@ -624,6 +641,9 @@ app.post('/api/products/add', async (req, res) => {
       previousStock: stockInfo,
       notified: new Set(alreadyInStock.length > 0 ? watchedSizes.filter(id => stockInfo[id]?.inStock) : [])
     });
+    
+    // Save to history
+    addToHistory(saleId, itemId, productInfo, sizeMapping);
 
     startMonitoring();
 
@@ -678,6 +698,46 @@ app.post('/api/products/:key/reset', (req, res) => {
   product.notified.clear();
   
   res.json({ success: true, message: 'Notifications reset' });
+});
+
+// ============== HISTORY API ==============
+
+// Get product history
+app.get('/api/history', (req, res) => {
+  const history = [];
+  for (const [key, item] of productHistory) {
+    history.push({
+      key,
+      saleId: item.saleId,
+      itemId: item.itemId,
+      title: item.title,
+      brand: item.brand,
+      sizeMapping: item.sizeMapping,
+      addedAt: item.addedAt,
+      lastMonitored: item.lastMonitored,
+      isCurrentlyMonitored: monitoredProducts.has(key)
+    });
+  }
+  // Sort by lastMonitored (most recent first)
+  history.sort((a, b) => new Date(b.lastMonitored) - new Date(a.lastMonitored));
+  res.json({ history });
+});
+
+// Clear history
+app.delete('/api/history', (req, res) => {
+  productHistory.clear();
+  res.json({ success: true, message: 'History cleared' });
+});
+
+// Remove single item from history
+app.delete('/api/history/:key', (req, res) => {
+  const { key } = req.params;
+  if (productHistory.has(key)) {
+    productHistory.delete(key);
+    res.json({ success: true, message: 'Item removed from history' });
+  } else {
+    res.status(404).json({ error: 'Item not found in history' });
+  }
 });
 
 // Parse auth from full headers or just the Authorization value
