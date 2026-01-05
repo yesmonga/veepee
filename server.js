@@ -304,7 +304,8 @@ let monitoringInterval = null;
 let cartRecoveryInterval = null;
 
 // Cart recovery config
-const CART_RECOVERY_INTERVAL_MS = 13 * 60 * 1000; // 13 minutes
+const CART_CHECK_INTERVAL_MS = 60 * 1000; // Check every 1 minute
+const CART_RENEW_BEFORE_EXPIRY_MS = 2 * 60 * 1000; // Renew 2 minutes before expiration
 
 // Add product to history
 async function addToHistory(saleId, itemId, productInfo, sizeMapping) {
@@ -791,7 +792,7 @@ async function checkAndRecoverCart() {
       console.log(`[${getTimestamp()}] 🛒 Cart is empty`);
       
       if (cartState.hasItems) {
-        // Cart was not empty before, notify
+        // Cart was not empty before, notify and stop
         cartState.hasItems = false;
         cartState.items = [];
         cartState.expirationDate = null;
@@ -809,70 +810,57 @@ async function checkAndRecoverCart() {
       cartState.lastRecover = new Date().toISOString();
       
       if (recoverResult && recoverResult.expirationDate) {
-        // Extract items from recovery response
-        let items = [];
-        if (recoverResult.deliveryGroups) {
-          recoverResult.deliveryGroups.forEach(group => {
-            if (group.cartItemGroups) {
-              group.cartItemGroups.forEach(cartGroup => {
-                if (cartGroup.items) {
-                  items = items.concat(cartGroup.items);
-                }
-              });
-            }
-          });
-        }
+        let items = extractItemsFromCart(recoverResult);
         
         cartState.hasItems = true;
         cartState.items = items;
         cartState.expirationDate = recoverResult.expirationDate;
         await saveCartStateToDB();
         
-        // Auto-start cart recovery if not already running
-        if (!cartRecoveryInterval && items.length > 0) {
-          console.log(`[${getTimestamp()}] 🔄 Items recovered - auto-starting cart recovery`);
-          cartState.recoveryActive = true;
-          await saveCartStateToDB();
-          cartRecoveryInterval = setInterval(checkAndRecoverCart, CART_RECOVERY_INTERVAL_MS);
-        }
-        
         console.log(`[${getTimestamp()}] ✅ Cart recovered! New expiration: ${recoverResult.expirationDate}`);
         await sendCartRecoveryNotification(items, recoverResult.expirationDate);
         
-        return { success: true, items: items.length, expirationDate: recoverResult.expirationDate };
+        return { success: true, items: items.length, expirationDate: recoverResult.expirationDate, renewed: true };
       }
     }
     
     // Cart has active items (not expired yet)
     if (cartData.deliveryGroups || cartData.unitCount > 0) {
-      let items = [];
-      if (cartData.deliveryGroups) {
-        cartData.deliveryGroups.forEach(group => {
-          if (group.cartItemGroups) {
-            group.cartItemGroups.forEach(cartGroup => {
-              if (cartGroup.items) {
-                items = items.concat(cartGroup.items);
-              }
-            });
-          }
-        });
-      }
+      let items = extractItemsFromCart(cartData);
       
       cartState.hasItems = true;
       cartState.items = items;
       cartState.expirationDate = cartData.expirationDate;
       await saveCartStateToDB();
       
-      // Auto-start cart recovery if items detected and not already running
-      if (!cartRecoveryInterval && items.length > 0) {
-        console.log(`[${getTimestamp()}] � Items detected in cart - auto-starting cart recovery`);
-        cartState.recoveryActive = true;
-        await saveCartStateToDB();
-        cartRecoveryInterval = setInterval(checkAndRecoverCart, CART_RECOVERY_INTERVAL_MS);
+      // Check if we need to renew (2 minutes before expiration)
+      const expirationTime = new Date(cartData.expirationDate).getTime();
+      const now = Date.now();
+      const timeUntilExpiry = expirationTime - now;
+      const minutesLeft = Math.floor(timeUntilExpiry / 60000);
+      
+      console.log(`[${getTimestamp()}] 🛒 Cart has ${items.length} items, expires in ${minutesLeft} min`);
+      
+      if (timeUntilExpiry <= CART_RENEW_BEFORE_EXPIRY_MS && timeUntilExpiry > 0) {
+        // Time to renew! 2 minutes or less before expiration
+        console.log(`[${getTimestamp()}] ⏰ ${minutesLeft} min left - renewing cart now!`);
+        
+        const recoverResult = await recoverCart();
+        cartState.lastRecover = new Date().toISOString();
+        
+        if (recoverResult && recoverResult.expirationDate) {
+          items = extractItemsFromCart(recoverResult);
+          cartState.expirationDate = recoverResult.expirationDate;
+          await saveCartStateToDB();
+          
+          console.log(`[${getTimestamp()}] ✅ Cart renewed! New expiration: ${recoverResult.expirationDate}`);
+          await sendCartRecoveryNotification(items, recoverResult.expirationDate);
+          
+          return { success: true, items: items.length, expirationDate: recoverResult.expirationDate, renewed: true };
+        }
       }
       
-      console.log(`[${getTimestamp()}] � Cart has ${items.length} items, expires: ${cartData.expirationDate}`);
-      return { success: true, items: items.length, expirationDate: cartData.expirationDate, needsRecovery: false };
+      return { success: true, items: items.length, expirationDate: cartData.expirationDate, renewed: false };
     }
     
     return { success: false, reason: 'unknown' };
@@ -889,6 +877,23 @@ async function checkAndRecoverCart() {
     
     return { success: false, error: error.message };
   }
+}
+
+// Helper to extract items from cart response
+function extractItemsFromCart(cartData) {
+  let items = [];
+  if (cartData.deliveryGroups) {
+    cartData.deliveryGroups.forEach(group => {
+      if (group.cartItemGroups) {
+        group.cartItemGroups.forEach(cartGroup => {
+          if (cartGroup.items) {
+            items = items.concat(cartGroup.items);
+          }
+        });
+      }
+    });
+  }
+  return items;
 }
 
 async function startCartRecovery(skipInitialCheck = false) {
@@ -908,13 +913,13 @@ async function startCartRecovery(skipInitialCheck = false) {
   
   cartState.recoveryActive = true;
   await saveCartStateToDB();
-  console.log(`[${getTimestamp()}] 🔄 Starting cart recovery (interval: ${CART_RECOVERY_INTERVAL_MS / 1000 / 60} min)`);
+  console.log(`[${getTimestamp()}] 🔄 Starting Cart Keeper (checks every ${CART_CHECK_INTERVAL_MS / 1000}s, renews 2min before expiry)`);
   
   // Run immediately
   checkAndRecoverCart();
   
-  // Then run every 13 minutes
-  cartRecoveryInterval = setInterval(checkAndRecoverCart, CART_RECOVERY_INTERVAL_MS);
+  // Then check every minute
+  cartRecoveryInterval = setInterval(checkAndRecoverCart, CART_CHECK_INTERVAL_MS);
   
   return { success: true, message: 'Cart recovery started' };
 }
@@ -936,15 +941,15 @@ function startCartKeeperLoop() {
     return;
   }
   
-  console.log(`[${getTimestamp()}] 🔄 Cart Keeper started (checks every ${CART_RECOVERY_INTERVAL_MS / 1000 / 60} min)`);
+  console.log(`[${getTimestamp()}] 🔄 Cart Keeper started (checks every ${CART_CHECK_INTERVAL_MS / 1000}s, renews 2min before expiry)`);
   cartState.recoveryActive = true;
   saveCartStateToDB();
   
   // Check immediately on start
   checkAndRecoverCart();
   
-  // Then check every 13 minutes
-  cartRecoveryInterval = setInterval(checkAndRecoverCart, CART_RECOVERY_INTERVAL_MS);
+  // Then check every minute
+  cartRecoveryInterval = setInterval(checkAndRecoverCart, CART_CHECK_INTERVAL_MS);
 }
 
 // ============== MONITORING LOGIC ==============
@@ -1314,8 +1319,10 @@ app.delete('/api/history/:key', async (req, res) => {
 app.get('/api/cart', (req, res) => {
   res.json({
     ...cartState,
-    recoveryIntervalMs: CART_RECOVERY_INTERVAL_MS,
-    recoveryIntervalMin: CART_RECOVERY_INTERVAL_MS / 1000 / 60
+    checkIntervalMs: CART_CHECK_INTERVAL_MS,
+    checkIntervalSec: CART_CHECK_INTERVAL_MS / 1000,
+    renewBeforeExpiryMs: CART_RENEW_BEFORE_EXPIRY_MS,
+    renewBeforeExpiryMin: CART_RENEW_BEFORE_EXPIRY_MS / 1000 / 60
   });
 });
 
