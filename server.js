@@ -797,6 +797,14 @@ async function checkAndRecoverCart() {
         cartState.expirationDate = recoverResult.expirationDate;
         await saveCartStateToDB();
         
+        // Auto-start cart recovery if not already running
+        if (!cartRecoveryInterval && items.length > 0) {
+          console.log(`[${getTimestamp()}] 🔄 Items recovered - auto-starting cart recovery`);
+          cartState.recoveryActive = true;
+          await saveCartStateToDB();
+          cartRecoveryInterval = setInterval(checkAndRecoverCart, CART_RECOVERY_INTERVAL_MS);
+        }
+        
         console.log(`[${getTimestamp()}] ✅ Cart recovered! New expiration: ${recoverResult.expirationDate}`);
         await sendCartRecoveryNotification(items, recoverResult.expirationDate);
         
@@ -824,7 +832,15 @@ async function checkAndRecoverCart() {
       cartState.expirationDate = cartData.expirationDate;
       await saveCartStateToDB();
       
-      console.log(`[${getTimestamp()}] 🛒 Cart has ${items.length} items, expires: ${cartData.expirationDate}`);
+      // Auto-start cart recovery if items detected and not already running
+      if (!cartRecoveryInterval && items.length > 0) {
+        console.log(`[${getTimestamp()}] � Items detected in cart - auto-starting cart recovery`);
+        cartState.recoveryActive = true;
+        await saveCartStateToDB();
+        cartRecoveryInterval = setInterval(checkAndRecoverCart, CART_RECOVERY_INTERVAL_MS);
+      }
+      
+      console.log(`[${getTimestamp()}] � Cart has ${items.length} items, expires: ${cartData.expirationDate}`);
       return { success: true, items: items.length, expirationDate: cartData.expirationDate, needsRecovery: false };
     }
     
@@ -844,10 +860,19 @@ async function checkAndRecoverCart() {
   }
 }
 
-async function startCartRecovery() {
+async function startCartRecovery(skipInitialCheck = false) {
   if (cartRecoveryInterval) {
     console.log(`[${getTimestamp()}] 🔄 Cart recovery already running`);
-    return;
+    return { success: true, message: 'Already running' };
+  }
+  
+  // First check if cart has items (unless we already know it does)
+  if (!skipInitialCheck) {
+    const cartData = await getCart();
+    if (cartData.empty) {
+      console.log(`[${getTimestamp()}] 🛒 Cannot start cart recovery - cart is empty`);
+      return { success: false, message: 'Cart is empty' };
+    }
   }
   
   cartState.recoveryActive = true;
@@ -859,6 +884,8 @@ async function startCartRecovery() {
   
   // Then run every 13 minutes
   cartRecoveryInterval = setInterval(checkAndRecoverCart, CART_RECOVERY_INTERVAL_MS);
+  
+  return { success: true, message: 'Cart recovery started' };
 }
 
 async function stopCartRecovery() {
@@ -1233,8 +1260,8 @@ app.post('/api/cart/check', async (req, res) => {
 
 // Start cart recovery
 app.post('/api/cart/recovery/start', async (req, res) => {
-  await startCartRecovery();
-  res.json({ success: true, message: 'Cart recovery started', cartState });
+  const result = await startCartRecovery();
+  res.json({ ...result, cartState });
 });
 
 // Stop cart recovery

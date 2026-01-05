@@ -1296,8 +1296,14 @@
           showToast('Prolongement arrêté');
         } else {
           // Start recovery
-          await fetch('/api/cart/recovery/start', { method: 'POST' });
-          showToast('Prolongement démarré (toutes les 13 min)');
+          const startRes = await fetch('/api/cart/recovery/start', { method: 'POST' });
+          const startData = await startRes.json();
+          
+          if (startData.success) {
+            showToast('Prolongement démarré (toutes les 13 min)');
+          } else {
+            showToast(startData.message || 'Panier vide - ajoutez des articles d\'abord', true);
+          }
         }
         
         loadCartStatus();
