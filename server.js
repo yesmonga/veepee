@@ -645,24 +645,54 @@ function sendDiscordNotification(productInfo, productId, size, quantity, deadlin
   });
 }
 
-function sendStockAlertNotification(productInfo, productId, size, quantity, productUrl) {
+function sendStockAlertNotification(productInfo, productId, size, quantity, productUrl, cartResult = null) {
+  // Determine cart status
+  let cartStatus = "❌ Non ajouté";
+  let cartColor = 0xe91e63; // Pink for stock alert only
+  let title = "🚨 STOCK DISPONIBLE!";
+  let content = "@everyone 🚨 **NOUVEAU STOCK - AJOUTE VITE AU PANIER!**";
+  
+  if (cartResult && cartResult.success) {
+    cartStatus = "✅ Ajouté au panier!";
+    cartColor = 0x22c55e; // Green for success
+    title = "🛒 AJOUTÉ AU PANIER!";
+    content = "@everyone 🛒 **ARTICLE AJOUTÉ AU PANIER - CHECKOUT MAINTENANT!**";
+  } else if (cartResult && cartResult.error) {
+    cartStatus = `❌ Échec: ${cartResult.error.substring(0, 50)}`;
+  }
+  
+  const fields = [
+    { name: "👕 Produit", value: `**${productInfo.title}**`, inline: false },
+    { name: "📏 Taille", value: `**${size}**`, inline: true },
+    { name: "📦 Quantité", value: `${quantity} dispo`, inline: true },
+    { name: "🛒 Panier", value: cartStatus, inline: true }
+  ];
+  
+  // Add price if available
+  if (cartResult && cartResult.success && cartResult.productInfo) {
+    fields.push({ name: "💰 Prix", value: `${cartResult.productInfo.price} ~~${cartResult.productInfo.originalPrice}~~ (${cartResult.productInfo.discount})`, inline: false });
+  } else if (productInfo.price && productInfo.price !== '-') {
+    fields.push({ name: "� Prix", value: productInfo.price, inline: true });
+  }
+  
+  // Add expiration if cart success
+  if (cartResult && cartResult.success && cartResult.expirationDate) {
+    const expDate = new Date(cartResult.expirationDate);
+    fields.push({ name: "⏰ Expire", value: expDate.toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'}), inline: true });
+  }
+  
+  fields.push({ name: "� Liens", value: `[Voir produit](${productUrl}) | [Checkout](${CONFIG.checkoutUrl})`, inline: false });
+  
   const embed = {
-    title: "🚨 STOCK DISPONIBLE!",
-    color: 0xe91e63, // Veepee pink
-    fields: [
-      { name: "👕 Produit", value: `**${productInfo.title}**`, inline: false },
-      { name: "📏 Taille", value: `**${size}**`, inline: true },
-      { name: "📦 Quantité", value: `${quantity} dispo`, inline: true },
-      { name: "💰 Prix", value: productInfo.price || '-', inline: true },
-      { name: "🔗 Lien produit", value: `[Voir sur Veepee](${productUrl})`, inline: true },
-      { name: "🛒 Checkout", value: `[Aller au panier](${CONFIG.checkoutUrl})`, inline: true }
-    ],
+    title: title,
+    color: cartColor,
+    fields: fields,
     footer: { text: `ID: ${productId}` },
     timestamp: new Date().toISOString()
   };
 
   return sendDiscordWebhook({
-    content: "@everyone 🚨 **NOUVEAU STOCK - AJOUTE VITE AU PANIER!**",
+    content: content,
     embeds: [embed]
   });
 }
@@ -956,23 +986,39 @@ async function monitorAllProducts() {
             // Mark as notified to avoid spam
             product.notified.add(productId);
             
-            // Send stock alert notification
+            // Try to add to cart automatically
             const productUrl = `https://www.veepee.fr/gr/product/${product.saleId}/${product.itemId}`;
+            let cartResult = null;
+            
+            try {
+              console.log(`[${getTimestamp()}] 🛒 Adding to cart: ${size} (${productId})...`);
+              cartResult = await addToCart(product.saleId, productId);
+              
+              if (cartResult.success) {
+                console.log(`[${getTimestamp()}] ✅ Added to cart! Expires: ${cartResult.expirationDate}`);
+                
+                // Start Cart Keeper when item is added to cart
+                if (!cartRecoveryInterval) {
+                  console.log(`[${getTimestamp()}] 🔄 Item in cart - starting Cart Keeper`);
+                  startCartKeeperLoop();
+                }
+              }
+            } catch (cartError) {
+              console.error(`[${getTimestamp()}] ❌ Add to cart failed:`, cartError.message);
+              cartResult = { success: false, error: cartError.message };
+            }
+            
+            // Send stock alert notification with cart status
             await sendStockAlertNotification(
               product.productInfo,
               productId,
               size,
               stockData.quantity,
-              productUrl
+              productUrl,
+              cartResult
             );
             
             console.log(`📢 Discord notification sent!`);
-            
-            // Start Cart Keeper when restock is detected
-            if (!cartRecoveryInterval) {
-              console.log(`[${getTimestamp()}] 🔄 Restock detected - starting Cart Keeper`);
-              startCartKeeperLoop();
-            }
           }
         }
         
