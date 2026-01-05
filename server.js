@@ -350,7 +350,8 @@ function generateSignature(method, path, date) {
     throw new Error('VEEPEE_USER_ID and VEEPEE_SECRET_KEY are required');
   }
   
-  const stringToSign = `${method}\n${path}\n${date}`;
+  // Order: method + date + path (discovered from APK decompilation)
+  const stringToSign = `${method}\n${date}\n${path}`;
   const signature = crypto
     .createHmac('sha256', CONFIG.secretKey)
     .update(stringToSign)
