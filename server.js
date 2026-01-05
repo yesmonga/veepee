@@ -898,15 +898,22 @@ async function stopCartRecovery() {
   }
 }
 
-// Cart Keeper Loop - always running, auto-recovers when items in cart
+// Cart Keeper Loop - starts on restock, stops when cart is empty
 function startCartKeeperLoop() {
+  if (cartRecoveryInterval) {
+    console.log(`[${getTimestamp()}] 🔄 Cart Keeper already running`);
+    return;
+  }
+  
   console.log(`[${getTimestamp()}] 🔄 Cart Keeper started (checks every ${CART_RECOVERY_INTERVAL_MS / 1000 / 60} min)`);
+  cartState.recoveryActive = true;
+  saveCartStateToDB();
   
   // Check immediately on start
   checkAndRecoverCart();
   
-  // Then check every 13 minutes - always running
-  setInterval(checkAndRecoverCart, CART_RECOVERY_INTERVAL_MS);
+  // Then check every 13 minutes
+  cartRecoveryInterval = setInterval(checkAndRecoverCart, CART_RECOVERY_INTERVAL_MS);
 }
 
 // ============== MONITORING LOGIC ==============
@@ -960,6 +967,12 @@ async function monitorAllProducts() {
             );
             
             console.log(`📢 Discord notification sent!`);
+            
+            // Start Cart Keeper when restock is detected
+            if (!cartRecoveryInterval) {
+              console.log(`[${getTimestamp()}] 🔄 Restock detected - starting Cart Keeper`);
+              startCartKeeperLoop();
+            }
           }
         }
         
@@ -1441,8 +1454,7 @@ async function startServer() {
     startMonitoring();
   }
   
-  // Always start cart keeper - it will auto-activate when items are in cart
-  startCartKeeperLoop();
+  // Cart Keeper will be started when a restock is detected
   
   app.listen(PORT, '0.0.0.0', () => {
     const dbStatus = useDatabase ? 'PostgreSQL ✅' : 'In-memory only ⚠️';
@@ -1463,7 +1475,7 @@ async function startServer() {
     console.log(`🗄️ Database: ${useDatabase ? 'PostgreSQL connected' : 'No database (data will not persist)'}`);
     console.log(`📦 Monitored products: ${monitoredProducts.size}`);
     console.log(`📋 History items: ${productHistory.size}`);
-    console.log(`🛒 Cart Keeper: Always active (auto-recovers when items in cart)`);
+    console.log(`🛒 Cart Keeper: Activates on restock detection`);
   });
 }
 

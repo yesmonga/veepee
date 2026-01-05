@@ -1173,12 +1173,16 @@
         const cartDetails = document.getElementById('cartDetails');
         const cartItems = document.getElementById('cartItems');
         
-        // Update status indicator - Cart Keeper always active
-        cartDot.classList.add('active');
-        if (data.hasItems && data.items.length > 0) {
-          cartStatusText.textContent = `🔄 Prolongement auto (${data.items.length} article${data.items.length > 1 ? 's' : ''})`;
+        // Update status indicator
+        if (data.recoveryActive && data.hasItems && data.items.length > 0) {
+          cartDot.classList.add('active');
+          cartStatusText.textContent = `🔄 Prolongement actif (${data.items.length} article${data.items.length > 1 ? 's' : ''})`;
+        } else if (data.recoveryActive) {
+          cartDot.classList.add('active');
+          cartStatusText.textContent = '🔄 Cart Keeper actif - vérifie le panier...';
         } else {
-          cartStatusText.textContent = '⏳ En attente d\'articles';
+          cartDot.classList.remove('active');
+          cartStatusText.textContent = '⏸️ En attente de restock';
         }
         
         // Update details
