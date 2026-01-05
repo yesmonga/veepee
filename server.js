@@ -898,6 +898,17 @@ async function stopCartRecovery() {
   }
 }
 
+// Cart Keeper Loop - always running, auto-recovers when items in cart
+function startCartKeeperLoop() {
+  console.log(`[${getTimestamp()}] 🔄 Cart Keeper started (checks every ${CART_RECOVERY_INTERVAL_MS / 1000 / 60} min)`);
+  
+  // Check immediately on start
+  checkAndRecoverCart();
+  
+  // Then check every 13 minutes - always running
+  setInterval(checkAndRecoverCart, CART_RECOVERY_INTERVAL_MS);
+}
+
 // ============== MONITORING LOGIC ==============
 
 function getTimestamp() {
@@ -1430,6 +1441,9 @@ async function startServer() {
     startMonitoring();
   }
   
+  // Always start cart keeper - it will auto-activate when items are in cart
+  startCartKeeperLoop();
+  
   app.listen(PORT, '0.0.0.0', () => {
     const dbStatus = useDatabase ? 'PostgreSQL ✅' : 'In-memory only ⚠️';
     console.log(`
@@ -1449,7 +1463,7 @@ async function startServer() {
     console.log(`🗄️ Database: ${useDatabase ? 'PostgreSQL connected' : 'No database (data will not persist)'}`);
     console.log(`📦 Monitored products: ${monitoredProducts.size}`);
     console.log(`📋 History items: ${productHistory.size}`);
-    console.log(`🛒 Cart recovery: ${cartState.recoveryActive ? 'Active' : 'Inactive'}`);
+    console.log(`🛒 Cart Keeper: Always active (auto-recovers when items in cart)`);
   });
 }
 

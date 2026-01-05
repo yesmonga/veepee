@@ -721,23 +721,20 @@
     </div>
   </div>
 
-  <div class="section-title">Panier & Prolongement</div>
+  <div class="section-title">Panier & Prolongement Auto</div>
   <div class="card" id="cartSection">
     <div class="cart-status" id="cartStatus">
       <div class="cart-header">
         <div class="cart-indicator">
-          <span class="status-dot" id="cartDot"></span>
-          <span id="cartStatusText">Chargement...</span>
+          <span class="status-dot active" id="cartDot"></span>
+          <span id="cartStatusText">Cart Keeper actif</span>
         </div>
       </div>
       <div class="cart-details" id="cartDetails"></div>
       <div class="cart-items" id="cartItems"></div>
-      <div class="cart-actions" style="display: flex; gap: 8px; margin-top: 16px;">
-        <button class="btn btn-secondary" onclick="checkCart()" style="flex: 1;">
-          🔍 Vérifier
-        </button>
-        <button class="btn btn-primary" id="recoveryBtn" onclick="toggleRecovery()" style="flex: 1;">
-          ▶️ Démarrer
+      <div class="cart-actions" style="margin-top: 16px;">
+        <button class="btn btn-secondary" onclick="checkCart()" style="width: 100%;">
+          🔍 Vérifier maintenant
         </button>
       </div>
     </div>
@@ -1175,29 +1172,13 @@
         const cartStatusText = document.getElementById('cartStatusText');
         const cartDetails = document.getElementById('cartDetails');
         const cartItems = document.getElementById('cartItems');
-        const recoveryBtn = document.getElementById('recoveryBtn');
         
-        // Update status indicator
-        if (data.recoveryActive) {
-          cartDot.classList.add('active');
-          cartStatusText.textContent = `Prolongement actif (${data.items.length} article${data.items.length > 1 ? 's' : ''})`;
-          recoveryBtn.textContent = '⏹️ Arrêter';
-          recoveryBtn.classList.remove('btn-primary');
-          recoveryBtn.classList.add('btn-danger');
-        } else if (data.hasItems) {
-          cartDot.classList.remove('active');
-          cartDot.style.background = '#fbbf24';
-          cartStatusText.textContent = `${data.items.length} article${data.items.length > 1 ? 's' : ''} dans le panier`;
-          recoveryBtn.textContent = '▶️ Démarrer';
-          recoveryBtn.classList.remove('btn-danger');
-          recoveryBtn.classList.add('btn-primary');
+        // Update status indicator - Cart Keeper always active
+        cartDot.classList.add('active');
+        if (data.hasItems && data.items.length > 0) {
+          cartStatusText.textContent = `🔄 Prolongement auto (${data.items.length} article${data.items.length > 1 ? 's' : ''})`;
         } else {
-          cartDot.classList.remove('active');
-          cartDot.style.background = 'rgba(255,255,255,0.3)';
-          cartStatusText.textContent = 'Panier vide';
-          recoveryBtn.textContent = '▶️ Démarrer';
-          recoveryBtn.classList.remove('btn-danger');
-          recoveryBtn.classList.add('btn-primary');
+          cartStatusText.textContent = '⏳ En attente d\'articles';
         }
         
         // Update details
@@ -1285,33 +1266,6 @@
       }
     }
     
-    async function toggleRecovery() {
-      try {
-        const response = await fetch('/api/cart');
-        const data = await response.json();
-        
-        if (data.recoveryActive) {
-          // Stop recovery
-          await fetch('/api/cart/recovery/stop', { method: 'POST' });
-          showToast('Prolongement arrêté');
-        } else {
-          // Start recovery
-          const startRes = await fetch('/api/cart/recovery/start', { method: 'POST' });
-          const startData = await startRes.json();
-          
-          if (startData.success) {
-            showToast('Prolongement démarré (toutes les 13 min)');
-          } else {
-            showToast(startData.message || 'Panier vide - ajoutez des articles d\'abord', true);
-          }
-        }
-        
-        loadCartStatus();
-      } catch (error) {
-        showToast('Erreur: ' + error.message, true);
-      }
-    }
-
     loadMonitoredProducts();
     loadHistory();
     loadCartStatus();
